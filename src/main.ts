@@ -91,6 +91,28 @@ async function sendHeartbeatIfNeeded(ntfyConfig: { serverUrl: string; heartbeatT
 }
 
 /**
+ * Polling interval constants (in milliseconds)
+ */
+const INTERVAL_WHEN_CLOSED = 10000; // 10 seconds when all targets are CLOSED
+const INTERVAL_WHEN_OPEN = 60000;   // 60 seconds when any target is OPEN
+
+/**
+ * Check if any enabled target is currently OPEN
+ */
+async function checkIfAnyTargetOpen(stateManager: JsonStateManager): Promise<boolean> {
+  const targets = await stateManager.listTargets();
+  const enabledTargets = targets.filter((t) => t.enabled);
+
+  for (const target of enabledTargets) {
+    const state = await stateManager.getState(target.id);
+    if (state && state.lastStatus === 'OPEN') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Main application
  */
 async function main(): Promise<void> {
@@ -257,6 +279,12 @@ async function main(): Promise<void> {
         logger.error(`Error checking target ${target.name}`, error);
       }
     }
+
+    // Adjust polling interval based on current states
+    // Use 60s interval if any target is OPEN, 10s if all are CLOSED
+    const hasAnyOpen = await checkIfAnyTargetOpen(stateManager);
+    const newInterval = hasAnyOpen ? INTERVAL_WHEN_OPEN : INTERVAL_WHEN_CLOSED;
+    scheduler.updateInterval(newInterval);
   };
 
   // Get initial target count for logging

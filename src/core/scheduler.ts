@@ -10,6 +10,7 @@ import type { SchedulerConfig } from '../types/index.js';
 export interface Scheduler {
   start(callback: () => Promise<void>): void;
   stop(): void;
+  updateInterval(intervalMs: number): void;
 }
 
 /**
@@ -18,6 +19,7 @@ export interface Scheduler {
 export class JitterScheduler implements Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  private currentCallback: (() => Promise<void>) | null = null;
 
   constructor(private config: SchedulerConfig) {}
 
@@ -26,6 +28,7 @@ export class JitterScheduler implements Scheduler {
    */
   start(callback: () => Promise<void>): void {
     this.isRunning = true;
+    this.currentCallback = callback;
     this.scheduleNext(callback);
   }
 
@@ -37,6 +40,24 @@ export class JitterScheduler implements Scheduler {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+  }
+
+  /**
+   * Update the polling interval dynamically
+   * Reschedules next run with new interval
+   */
+  updateInterval(intervalMs: number): void {
+    // Update the base interval
+    this.config.baseIntervalMs = intervalMs;
+
+    // If running, reschedule next run immediately with new interval
+    if (this.isRunning && this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+      if (this.currentCallback) {
+        this.scheduleNext(this.currentCallback);
+      }
     }
   }
 
