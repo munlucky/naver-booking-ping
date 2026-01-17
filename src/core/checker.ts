@@ -108,8 +108,15 @@ export class PlaywrightChecker implements Checker {
         error: error instanceof Error ? error : new Error(String(error)),
       };
     } finally {
-      // Close the page to free resources (we create a fresh page each time now)
-      await page.close().catch(() => {});
+      // Close the page to free resources
+      // Use runBeforeUnload: false to force close even if page has beforeunload handlers
+      try {
+        await page.close({ runBeforeUnload: false });
+      } catch (error) {
+        // If close fails, log and continue - resources will be cleaned up on browser restart
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn(`[Checker] Page close failed (will be cleaned up on restart): ${errorMsg}`);
+      }
     }
   }
 
