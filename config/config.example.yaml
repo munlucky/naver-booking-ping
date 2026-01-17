@@ -1,0 +1,38 @@
+# Naver Booking Ping Configuration
+
+# ntfy settings - https://ntfy.sh
+ntfy:
+  serverUrl: "https://ntfy.sh"
+  # Generate a random topic name for security
+  topic: "YOUR_RANDOM_STRING_HERE"
+  priority: "high"
+  tags: ["bell", "calendar"]
+  # Heartbeat topic for daily status check (optional)
+  heartbeatTopic: "YOUR_RANDOM_STRING_HERE"
+
+# Scheduler settings
+scheduler:
+  baseIntervalMs: 20000      # 20 seconds base interval
+  jitterRatio: 0.3           # +/- 30% jitter (14-26 seconds)
+
+# Browser settings
+browser:
+  headless: true
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+  timeoutMs: 30000           # 30 seconds timeout for page load
+  viewport: { "width": 390, "height": 844 }
+
+# Logging settings
+logging:
+  level: "INFO"              # DEBUG, INFO, WARN, ERROR
+  file: "./logs/app.log"
+
+# Monitoring targets
+targets:
+  - name: "Sample Target"
+    # Replace with your actual Naver booking URL
+    urlInput: "https://m.place.naver.com/hospital/12345/home"
+    enabled: true
+    policy: "AB"            # Rules: A (booking link), B (booking button)
+
+# To add more targets, copy the above block with different values

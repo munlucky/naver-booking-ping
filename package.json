@@ -1,0 +1,37 @@
+{
+  "name": "naver-booking-ping",
+  "version": "1.0.0",
+  "description": "Naver booking opening detection system with ntfy notifications",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop naver-booking-ping",
+    "pm2:restart": "pm2 restart naver-booking-ping",
+    "pm2:logs": "pm2 logs naver-booking-ping",
+    "pm2:status": "pm2 status",
+    "dev": "tsc && node dist/main.js",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "naver",
+    "booking",
+    "notification",
+    "ntfy"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "playwright": "^1.49.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.2",
+    "pm2": "^6.0.14",
+    "typescript": "^5.7.2"
+  }
+}
