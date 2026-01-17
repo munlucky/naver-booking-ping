@@ -108,8 +108,8 @@ export class PlaywrightChecker implements Checker {
         error: error instanceof Error ? error : new Error(String(error)),
       };
     } finally {
-      // Clean up page for next use
-      await page.goto('about:blank').catch(() => {});
+      // Close the page to free resources (we create a fresh page each time now)
+      await page.close().catch(() => {});
     }
   }
 

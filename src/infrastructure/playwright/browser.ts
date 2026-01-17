@@ -25,27 +25,20 @@ export class PlaywrightBrowserManager implements BrowserManager {
 
   /**
    * Get or create a page instance
+   * Creates a fresh page for each request to avoid crashes from reuse
    */
   async getPage(): Promise<Page> {
-    // Return existing page if it's still valid
-    if (this.page && !this.page.isClosed()) {
-      return this.page;
-    }
-
-    // Clean up closed page reference
-    if (this.page?.isClosed()) {
-      this.page = null;
-    }
-
     // Initialize browser if needed
-    if (!this.browser) {
+    if (!this.browser || this.browser.isConnected() === false) {
       this.browser = await chromium.launch({
         headless: this.config.headless,
       });
+      // Reset context when browser is recreated
+      this.context = null;
     }
 
-    // Initialize context if needed
-    if (!this.context) {
+    // Initialize context if needed (check if context is still valid)
+    if (!this.context || this.context.pages().length === 0) {
       const contextOptions: { userAgent: string; viewport?: { width: number; height: number } } = {
         userAgent: this.config.userAgent,
       };
@@ -57,11 +50,11 @@ export class PlaywrightBrowserManager implements BrowserManager {
       this.context = await this.browser.newContext(contextOptions);
     }
 
-    // Create new page
-    this.page = await this.context.newPage();
-    this.page.setDefaultTimeout(this.config.timeoutMs);
+    // Always create a fresh page to avoid crashes from reuse
+    const page = await this.context.newPage();
+    page.setDefaultTimeout(this.config.timeoutMs);
 
-    return this.page;
+    return page;
   }
 
   /**

@@ -3,6 +3,7 @@ module.exports = {
     name: 'naver-booking-ping',
     script: 'dist/main.js',
     instances: 1,
+    exec_mode: 'fork',  // 명시적으로 fork 모드 (cluster 모드는 중복 체크 유발)
     autostart: true,
     watch: false,
     max_memory_restart: '500M',

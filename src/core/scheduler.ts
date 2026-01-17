@@ -20,6 +20,7 @@ export class JitterScheduler implements Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private currentCallback: (() => Promise<void>) | null = null;
+  private isCallbackRunning: boolean = false; // Prevent concurrent executions
 
   constructor(private config: SchedulerConfig) {}
 
@@ -45,20 +46,21 @@ export class JitterScheduler implements Scheduler {
 
   /**
    * Update the polling interval dynamically
-   * Reschedules next run with new interval
+   * Only reschedules if callback is not currently running
    */
   updateInterval(intervalMs: number): void {
     // Update the base interval
     this.config.baseIntervalMs = intervalMs;
 
-    // If running, reschedule next run immediately with new interval
-    if (this.isRunning && this.timer) {
+    // Only reschedule if not currently running a callback
+    if (this.isRunning && this.timer && !this.isCallbackRunning) {
       clearTimeout(this.timer);
       this.timer = null;
       if (this.currentCallback) {
         this.scheduleNext(this.currentCallback);
       }
     }
+    // If callback is running, it will use the new interval when it completes
   }
 
   /**
@@ -72,10 +74,23 @@ export class JitterScheduler implements Scheduler {
     const delay = this.calculateDelay();
 
     this.timer = setTimeout(async () => {
+      // Prevent concurrent execution
+      if (this.isCallbackRunning) {
+        console.warn('[Scheduler] Callback already running, skipping duplicate execution');
+        // Reschedule for later
+        if (this.isRunning) {
+          this.scheduleNext(callback);
+        }
+        return;
+      }
+
+      this.isCallbackRunning = true;
       try {
         await callback();
       } catch (error) {
         console.error('[Scheduler] Callback error:', error);
+      } finally {
+        this.isCallbackRunning = false;
       }
 
       // Schedule next run

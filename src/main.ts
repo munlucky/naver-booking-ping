@@ -269,6 +269,11 @@ async function main(): Promise<void> {
           `Check complete: ${target.name} -> ${result.status} (evidence: ${result.evidence.join(', ') || 'none'})`
         );
 
+        // Log error if present (UNKNOWN status with error)
+        if (result.error) {
+          logger.info(`  Error: ${result.error.message}`);
+        }
+
         // Log debug info if available
         if (result.debug) {
           logger.info(
