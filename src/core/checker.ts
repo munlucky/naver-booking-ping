@@ -63,8 +63,18 @@ export class PlaywrightChecker implements Checker {
         timeout: this.timeoutMs,
       });
 
-      // Wait for dynamic content to load
-      await page.waitForTimeout(3000);
+      // Wait for target name to confirm rendering is complete
+      // This ensures the page content is fully loaded before checking buttons
+      if (target.name) {
+        try {
+          await page.waitForSelector(`:text("${target.name}")`, { timeout: 10000 });
+        } catch {
+          // If target name not found, fall back to a small delay
+          await page.waitForTimeout(2000);
+        }
+      } else {
+        await page.waitForTimeout(2000);
+      }
 
       // Get final URL after redirects
       const finalUrl = page.url();
