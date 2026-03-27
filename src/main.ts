@@ -4,13 +4,17 @@
 
 import { loadConfigSafe } from './config/index.js';
 import { JsonStateManager } from './core/state-manager.js';
-import { createBrowserManager } from './infrastructure/playwright/browser.js';
+import { bootstrapBrowserSession, createBrowserManager } from './infrastructure/playwright/browser.js';
 import { createChecker } from './core/checker.js';
 import { createNotifier } from './core/notifier.js';
 import { createScheduler } from './core/scheduler.js';
 import { createLogger } from './utils/logger.js';
+import { buildSkyscannerUrl } from './core/flight-price.js';
+import type { ConfiguredTarget, NewTarget, Target } from './types/index.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import { createInterface } from 'readline/promises';
+import { stdin as input, stdout as output } from 'process';
 
 /**
  * Heartbeat: Daily 7 AM notification to confirm system is running
@@ -101,7 +105,7 @@ const INTERVAL_WHEN_OPEN = 60000;   // 60 seconds when any target is OPEN
  */
 async function checkIfAnyTargetOpen(stateManager: JsonStateManager): Promise<boolean> {
   const targets = await stateManager.listTargets();
-  const enabledTargets = targets.filter((t) => t.enabled);
+  const enabledTargets = targets.filter((t) => t.enabled && t.kind === 'naver-booking');
 
   for (const target of enabledTargets) {
     const state = await stateManager.getState(target.id);
@@ -112,6 +116,60 @@ async function checkIfAnyTargetOpen(stateManager: JsonStateManager): Promise<boo
   return false;
 }
 
+function resolveConfiguredTarget(targetConfig: ConfiguredTarget): NewTarget {
+  if (targetConfig.kind === 'flight-price') {
+    return {
+      kind: 'flight-price',
+      name: targetConfig.name,
+      enabled: targetConfig.enabled,
+      provider: targetConfig.provider,
+      priceQuery: targetConfig.priceQuery,
+      urlInput: targetConfig.urlInput || buildSkyscannerUrl(targetConfig.priceQuery),
+      urlFinalLast: targetConfig.urlFinalLast || null,
+    };
+  }
+
+  return {
+    kind: 'naver-booking',
+    name: targetConfig.name,
+    urlInput: targetConfig.urlInput,
+    urlFinalLast: targetConfig.urlFinalLast || null,
+    enabled: targetConfig.enabled,
+    policy: targetConfig.policy,
+  };
+}
+
+function isSameTargetConfig(existingTarget: Target, normalizedTarget: NewTarget): boolean {
+  if (
+    existingTarget.kind !== normalizedTarget.kind ||
+    existingTarget.name !== normalizedTarget.name ||
+    existingTarget.urlInput !== normalizedTarget.urlInput ||
+    existingTarget.urlFinalLast !== normalizedTarget.urlFinalLast ||
+    existingTarget.enabled !== normalizedTarget.enabled
+  ) {
+    return false;
+  }
+
+  if (normalizedTarget.kind === 'naver-booking') {
+    return existingTarget.kind === 'naver-booking' && existingTarget.policy === normalizedTarget.policy;
+  }
+
+  return (
+    existingTarget.kind === 'flight-price' &&
+    existingTarget.provider === normalizedTarget.provider &&
+    JSON.stringify(existingTarget.priceQuery) === JSON.stringify(normalizedTarget.priceQuery)
+  );
+}
+
+async function waitForEnter(message: string): Promise<void> {
+  const rl = createInterface({ input, output });
+  try {
+    await rl.question(`${message}\n`);
+  } finally {
+    rl.close();
+  }
+}
+
 /**
  * Main application
  */
@@ -120,6 +178,7 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const configPath = args.find((a) => a.startsWith('--config='))?.split('=')[1];
   const isTestMode = args.includes('--test');
+  const isBootstrapFlightSessionMode = args.includes('--bootstrap-flight-session');
 
   // Load configuration
   const { config, error } = await loadConfigSafe(configPath);
@@ -140,20 +199,44 @@ async function main(): Promise<void> {
   // Load targets from config
   if (config.targets && config.targets.length > 0) {
     for (const targetConfig of config.targets) {
+      const normalizedTarget = resolveConfiguredTarget(targetConfig);
       const existingTargets = await stateManager.listTargets();
-      const exists = existingTargets.some((t) => t.urlInput === targetConfig.urlInput);
+      const existingTarget = existingTargets.find((target) => target.urlInput === normalizedTarget.urlInput);
 
-      if (!exists) {
-        const id = await stateManager.addTarget({
-          name: targetConfig.name,
-          urlInput: targetConfig.urlInput,
-          urlFinalLast: targetConfig.urlFinalLast || null,
-          enabled: targetConfig.enabled,
-          policy: targetConfig.policy,
-        });
-        logger.info(`Added target: ${targetConfig.name} (${id})`);
+      if (!existingTarget) {
+        const id = await stateManager.addTarget(normalizedTarget);
+        logger.info(`Added target: ${normalizedTarget.name} (${id})`);
+      } else if (!isSameTargetConfig(existingTarget, normalizedTarget)) {
+        await stateManager.updateTarget(existingTarget.id, normalizedTarget);
+        logger.info(`Synced target config: ${normalizedTarget.name} (${existingTarget.id})`);
       }
     }
+  }
+
+  if (isBootstrapFlightSessionMode) {
+    const bootstrapTarget = config.targets
+      ?.map((targetConfig) => resolveConfiguredTarget(targetConfig))
+      .find((target) => target.kind === 'flight-price' && target.enabled);
+
+    if (!bootstrapTarget || bootstrapTarget.kind !== 'flight-price') {
+      logger.error('No enabled flight-price target found for bootstrap session');
+      process.exit(1);
+    }
+
+    logger.info(`Launching manual Skyscanner session bootstrap for ${bootstrapTarget.name}`);
+    const session = await bootstrapBrowserSession(
+      {
+        ...config.browser,
+        headless: false,
+      },
+      bootstrapTarget.urlInput
+    );
+    await waitForEnter(
+      `브라우저에서 Skyscanner 챌린지를 직접 통과한 뒤 Enter를 누르면 세션을 저장하고 종료합니다. 저장 경로: ${config.browser.storageStatePath}`
+    );
+    await session.saveAndClose();
+    logger.info(`Saved browser session to ${config.browser.storageStatePath}`);
+    process.exit(0);
   }
 
   // Test notification mode
@@ -226,8 +309,13 @@ async function main(): Promise<void> {
       logger.info(`Checking target: ${target.name}`);
 
       try {
+        const prevState = await stateManager.getState(target.id);
+        const prevStatus = prevState?.lastStatus || 'UNKNOWN';
+
         // Perform check
-        const result = await checker.check(target);
+        const result = await checker.check(target, {
+          previousState: prevState,
+        });
 
         // Log the result
         await stateManager.addLog({
@@ -236,6 +324,7 @@ async function main(): Promise<void> {
           status: result.status,
           evidence: JSON.stringify(result.evidence),
           error: result.error?.message,
+          details: result.details ? JSON.stringify(result.details) : undefined,
         });
 
         // Update final URL if changed
@@ -245,24 +334,24 @@ async function main(): Promise<void> {
           });
         }
 
-        // Check for status change
-        const prevState = await stateManager.getState(target.id);
-        const prevStatus = prevState?.lastStatus || 'UNKNOWN';
+        const shouldNotify = result.shouldNotify === true && !!result.notification;
 
-        if (result.status === 'OPEN' && prevStatus !== 'OPEN') {
-          // Status changed to OPEN - send notification
-          logger.info(`Status changed: ${prevStatus} -> ${result.status} for ${target.name}`);
-          await notifier.send({
-            title: `[${target.name}] 예약 버튼 활성화`,
-            body: `예약 버튼이 활성화됐습니다!`,
-            clickUrl: target.urlInput,
+        if (shouldNotify && result.notification) {
+          logger.info(`Alert condition met: ${prevStatus} -> ${result.status} for ${target.name}`);
+          await notifier.send(result.notification);
+          await stateManager.setState(target.id, {
+            status: result.status,
+            observedValue: result.observedValue,
           });
-          // Save state after sending notification
-          await stateManager.setState(target.id, result.status);
+          if (result.notificationKey !== undefined) {
+            await stateManager.markNotified(target.id, result.notificationKey);
+          }
           logger.info(`Notification sent for ${target.name}`);
         } else {
-          // Save state (OPEN → OPEN or CLOSED → CLOSED)
-          await stateManager.setState(target.id, result.status);
+          await stateManager.setState(target.id, {
+            status: result.status,
+            observedValue: result.observedValue,
+          });
         }
 
         logger.info(
@@ -279,6 +368,10 @@ async function main(): Promise<void> {
           logger.info(
             `  Debug: title="${result.debug.title}", bookingLinks=${result.debug.bookingLinks}, bookingButtons=${result.debug.bookingButtons}`
           );
+        }
+
+        if (result.details?.currentPrice && result.observedCurrency) {
+          logger.info(`  Detail: currentPrice=${result.observedCurrency} ${result.details.currentPrice}`);
         }
       } catch (error) {
         logger.error(`Error checking target ${target.name}`, error);

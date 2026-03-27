@@ -6,7 +6,16 @@
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { dirname } from 'path';
-import type { Target, TargetState, CheckLog, BookingStatus } from '../types/index.js';
+import type {
+  Target,
+  TargetState,
+  CheckLog,
+  BookingStatus,
+  TargetKind,
+  FlightProvider,
+  FlightPriceQuery,
+  NewTarget,
+} from '../types/index.js';
 
 /**
  * Data directory and files
@@ -57,11 +66,14 @@ function writeJsonFile<T>(path: string, data: T): void {
  */
 interface TargetData {
   id: string;
+  kind?: TargetKind;
   name: string;
   urlInput: string;
   urlFinalLast: string | null;
   enabled: boolean;
-  policy: string;
+  policy?: string;
+  provider?: FlightProvider;
+  priceQuery?: FlightPriceQuery;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +87,9 @@ interface StateData {
   lastChangedAt: string;
   lastOpenAt: string | null;
   consecutiveFailures: number;
+  lastObservedValue?: number | null;
+  bestObservedValue?: number | null;
+  lastNotifiedFingerprint?: string | null;
   updatedAt: string;
 }
 
@@ -88,7 +103,13 @@ interface LogEntryData {
   status: BookingStatus;
   evidence: string;
   error: string | null;
+  details?: string | null;
   createdAt: string;
+}
+
+export interface StateUpdate {
+  status: BookingStatus;
+  observedValue?: number | null;
 }
 
 /**
@@ -96,7 +117,7 @@ interface LogEntryData {
  */
 export interface StateManager {
   // Targets
-  addTarget(target: Omit<Target, 'id'>): Promise<string>;
+  addTarget(target: NewTarget): Promise<string>;
   getTarget(id: string): Promise<Target | null>;
   listTargets(): Promise<Target[]>;
   updateTarget(id: string, updates: Partial<Target>): Promise<void>;
@@ -104,7 +125,8 @@ export interface StateManager {
 
   // States
   getState(targetId: string): Promise<TargetState | null>;
-  setState(targetId: string, status: BookingStatus): Promise<void>;
+  setState(targetId: string, update: StateUpdate): Promise<void>;
+  markNotified(targetId: string, fingerprint: string | null): Promise<void>;
 
   // Logs
   addLog(log: Omit<CheckLog, 'id' | 'createdAt'>): Promise<void>;
@@ -144,17 +166,20 @@ export class JsonStateManager implements StateManager {
   /**
    * Add a new target
    */
-  async addTarget(target: Omit<Target, 'id'>): Promise<string> {
+  async addTarget(target: NewTarget): Promise<string> {
     const id = randomUUID();
     const now = new Date().toISOString();
 
     const targetData: TargetData = {
       id,
+      kind: target.kind,
       name: target.name,
       urlInput: target.urlInput,
       urlFinalLast: target.urlFinalLast || null,
       enabled: target.enabled,
-      policy: target.policy,
+      policy: target.kind === 'naver-booking' ? target.policy : undefined,
+      provider: target.kind === 'flight-price' ? target.provider : undefined,
+      priceQuery: target.kind === 'flight-price' ? target.priceQuery : undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -168,6 +193,9 @@ export class JsonStateManager implements StateManager {
       lastChangedAt: now,
       lastOpenAt: null,
       consecutiveFailures: 0,
+      lastObservedValue: null,
+      bestObservedValue: null,
+      lastNotifiedFingerprint: null,
       updatedAt: now,
     };
     this.states.set(id, stateData);
@@ -183,13 +211,29 @@ export class JsonStateManager implements StateManager {
     const data = this.targets.get(id);
     if (!data) return null;
 
+    if ((data.kind ?? 'naver-booking') === 'flight-price' && data.provider && data.priceQuery) {
+      return {
+        id: data.id,
+        kind: 'flight-price',
+        name: data.name,
+        urlInput: data.urlInput,
+        urlFinalLast: data.urlFinalLast,
+        enabled: data.enabled,
+        provider: data.provider,
+        priceQuery: data.priceQuery,
+        createdAt: new Date(data.createdAt),
+        updatedAt: new Date(data.updatedAt),
+      };
+    }
+
     return {
       id: data.id,
+      kind: 'naver-booking',
       name: data.name,
       urlInput: data.urlInput,
       urlFinalLast: data.urlFinalLast,
       enabled: data.enabled,
-      policy: data.policy,
+      policy: data.policy || 'ABC',
       createdAt: new Date(data.createdAt),
       updatedAt: new Date(data.updatedAt),
     };
@@ -199,16 +243,34 @@ export class JsonStateManager implements StateManager {
    * List all targets
    */
   async listTargets(): Promise<Target[]> {
-    return Array.from(this.targets.values()).map((data) => ({
-      id: data.id,
-      name: data.name,
-      urlInput: data.urlInput,
-      urlFinalLast: data.urlFinalLast,
-      enabled: data.enabled,
-      policy: data.policy,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    }));
+    return Array.from(this.targets.values()).map((data) => {
+      if ((data.kind ?? 'naver-booking') === 'flight-price' && data.provider && data.priceQuery) {
+        return {
+          id: data.id,
+          kind: 'flight-price' as const,
+          name: data.name,
+          urlInput: data.urlInput,
+          urlFinalLast: data.urlFinalLast,
+          enabled: data.enabled,
+          provider: data.provider,
+          priceQuery: data.priceQuery,
+          createdAt: new Date(data.createdAt),
+          updatedAt: new Date(data.updatedAt),
+        };
+      }
+
+      return {
+        id: data.id,
+        kind: 'naver-booking' as const,
+        name: data.name,
+        urlInput: data.urlInput,
+        urlFinalLast: data.urlFinalLast,
+        enabled: data.enabled,
+        policy: data.policy || 'ABC',
+        createdAt: new Date(data.createdAt),
+        updatedAt: new Date(data.updatedAt),
+      };
+    });
   }
 
   /**
@@ -224,7 +286,14 @@ export class JsonStateManager implements StateManager {
     if (updates.urlInput !== undefined) data.urlInput = updates.urlInput;
     if (updates.urlFinalLast !== undefined) data.urlFinalLast = updates.urlFinalLast;
     if (updates.enabled !== undefined) data.enabled = updates.enabled;
-    if (updates.policy !== undefined) data.policy = updates.policy;
+    if (updates.kind !== undefined) data.kind = updates.kind;
+    if (updates.kind === 'naver-booking' && updates.policy !== undefined) {
+      data.policy = updates.policy;
+    }
+    if (updates.kind === 'flight-price') {
+      if (updates.provider !== undefined) data.provider = updates.provider;
+      if (updates.priceQuery !== undefined) data.priceQuery = updates.priceQuery;
+    }
     data.updatedAt = now;
 
     this.targets.set(id, data);
@@ -268,6 +337,9 @@ export class JsonStateManager implements StateManager {
       lastChangedAt: new Date(data.lastChangedAt),
       lastOpenAt: data.lastOpenAt ? new Date(data.lastOpenAt) : null,
       consecutiveFailures: data.consecutiveFailures,
+      lastObservedValue: data.lastObservedValue ?? null,
+      bestObservedValue: data.bestObservedValue ?? null,
+      lastNotifiedFingerprint: data.lastNotifiedFingerprint ?? null,
       updatedAt: new Date(data.updatedAt),
     };
   }
@@ -275,9 +347,11 @@ export class JsonStateManager implements StateManager {
   /**
    * Set state for a target
    */
-  async setState(targetId: string, status: BookingStatus): Promise<void> {
+  async setState(targetId: string, update: StateUpdate): Promise<void> {
     const now = new Date().toISOString();
     const currentState = this.states.get(targetId);
+    const status = update.status;
+    const observedValue = update.observedValue ?? null;
 
     if (!currentState) {
       // Should not happen, but handle gracefully
@@ -287,6 +361,9 @@ export class JsonStateManager implements StateManager {
         lastChangedAt: now,
         lastOpenAt: status === 'OPEN' ? now : null,
         consecutiveFailures: 0,
+        lastObservedValue: observedValue,
+        bestObservedValue: observedValue,
+        lastNotifiedFingerprint: null,
         updatedAt: now,
       };
       this.states.set(targetId, newState);
@@ -300,10 +377,34 @@ export class JsonStateManager implements StateManager {
         }
         currentState.consecutiveFailures = 0;
       }
+      currentState.lastObservedValue = observedValue;
+      if (
+        observedValue !== null &&
+        (currentState.bestObservedValue === undefined ||
+          currentState.bestObservedValue === null ||
+          observedValue < currentState.bestObservedValue)
+      ) {
+        currentState.bestObservedValue = observedValue;
+      }
       currentState.updatedAt = now;
       this.states.set(targetId, currentState);
     }
 
+    this.save();
+  }
+
+  /**
+   * Store the last successful notification fingerprint
+   */
+  async markNotified(targetId: string, fingerprint: string | null): Promise<void> {
+    const currentState = this.states.get(targetId);
+    if (!currentState) {
+      return;
+    }
+
+    currentState.lastNotifiedFingerprint = fingerprint;
+    currentState.updatedAt = new Date().toISOString();
+    this.states.set(targetId, currentState);
     this.save();
   }
 
@@ -321,6 +422,7 @@ export class JsonStateManager implements StateManager {
       status: log.status,
       evidence: log.evidence,
       error: log.error || null,
+      details: log.details || null,
       createdAt: now,
     };
 
@@ -352,6 +454,7 @@ export class JsonStateManager implements StateManager {
       status: data.status,
       evidence: data.evidence,
       error: data.error || undefined,
+      details: data.details || undefined,
       createdAt: new Date(data.createdAt),
     }));
   }

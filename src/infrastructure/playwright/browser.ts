@@ -2,6 +2,8 @@
  * Playwright browser manager
  */
 
+import { existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
 import type { BrowserConfig } from '../../types/index.js';
 
@@ -11,6 +13,67 @@ import type { BrowserConfig } from '../../types/index.js';
 export interface BrowserManager {
   getPage(): Promise<Page>;
   close(): Promise<void>;
+}
+
+function ensureParentDir(filePath: string | undefined): void {
+  if (!filePath) {
+    return;
+  }
+
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function createLaunchOptions(config: BrowserConfig, headlessOverride?: boolean) {
+  return {
+    headless: headlessOverride ?? config.headless,
+    channel: config.channel,
+    args: config.launchArgs,
+  };
+}
+
+function createContextOptions(config: BrowserConfig) {
+  const contextOptions: {
+    userAgent: string;
+    viewport?: { width: number; height: number };
+    locale?: string;
+    timezoneId?: string;
+    storageState?: string;
+    extraHTTPHeaders?: Record<string, string>;
+  } = {
+    userAgent: config.userAgent,
+    locale: config.locale,
+    timezoneId: config.timezoneId,
+    extraHTTPHeaders: config.locale
+      ? {
+          'Accept-Language': `${config.locale},ko;q=0.9,en-US;q=0.8,en;q=0.7`,
+        }
+      : undefined,
+  };
+
+  if (config.viewport) {
+    contextOptions.viewport = config.viewport;
+  }
+
+  if (config.storageStatePath && existsSync(config.storageStatePath)) {
+    contextOptions.storageState = config.storageStatePath;
+  }
+
+  return contextOptions;
+}
+
+async function applyStealth(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+    const chromeObject = { runtime: {} };
+    Object.defineProperty(window, 'chrome', {
+      get: () => chromeObject,
+    });
+  });
 }
 
 /**
@@ -42,9 +105,7 @@ export class PlaywrightBrowserManager implements BrowserManager {
 
     // Initialize browser if needed
     if (!this.browser || this.browser.isConnected() === false) {
-      this.browser = await chromium.launch({
-        headless: this.config.headless,
-      });
+      this.browser = await chromium.launch(createLaunchOptions(this.config));
       // Reset context when browser is recreated
       this.context = null;
       this.contextUseCount = 0;
@@ -62,15 +123,10 @@ export class PlaywrightBrowserManager implements BrowserManager {
         await this.context.close().catch(() => {});
       }
 
-      const contextOptions: { userAgent: string; viewport?: { width: number; height: number } } = {
-        userAgent: this.config.userAgent,
-      };
-
-      if (this.config.viewport) {
-        contextOptions.viewport = this.config.viewport;
+      this.context = await this.browser.newContext(createContextOptions(this.config));
+      if (this.config.stealth !== false) {
+        await applyStealth(this.context);
       }
-
-      this.context = await this.browser.newContext(contextOptions);
       this.contextUseCount = 0;
     }
 
@@ -112,4 +168,54 @@ export class PlaywrightBrowserManager implements BrowserManager {
  */
 export async function createBrowserManager(config: BrowserConfig): Promise<BrowserManager> {
   return new PlaywrightBrowserManager(config);
+}
+
+/**
+ * Launch a manual browser session and persist cookies/storage for later automated runs
+ */
+export interface BootstrapBrowserSession {
+  saveAndClose(): Promise<void>;
+}
+
+export async function bootstrapBrowserSession(
+  config: BrowserConfig,
+  url: string
+): Promise<BootstrapBrowserSession> {
+  ensureParentDir(config.storageStatePath);
+
+  const browser = await chromium.launch(createLaunchOptions(config, false));
+  const context = await browser.newContext(createContextOptions(config));
+  if (config.stealth !== false) {
+    await applyStealth(context);
+  }
+
+  const page = await context.newPage();
+  page.setDefaultTimeout(config.timeoutMs);
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: config.timeoutMs,
+  });
+
+  await page.waitForTimeout(2000);
+
+  const saveAndClose = async () => {
+    await context.storageState({
+      path: config.storageStatePath,
+    });
+    await browser.close().catch(() => {});
+  };
+
+  process.on('SIGINT', async () => {
+    await saveAndClose();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    await saveAndClose();
+    process.exit(0);
+  });
+
+  return {
+    saveAndClose,
+  };
 }
