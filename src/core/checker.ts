@@ -314,7 +314,7 @@ export class PlaywrightChecker implements Checker {
       const status = this.determineStatus(evidence, target.policy);
       const shouldNotify = status === 'OPEN' && previousState?.lastStatus !== 'OPEN';
       const primaryMatch = matches[0];
-      const clickUrl = primaryMatch?.href ?? target.urlInput;
+      const clickUrl = finalUrl || target.urlInput;
       const screenshotPath = shouldNotify
         ? await this.captureEvidenceScreenshot(page, target.id, target.name)
         : undefined;

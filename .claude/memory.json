@@ -29,7 +29,7 @@
       "entityType": "domain",
       "observations": [
         "예약 OPEN 판정은 예약 링크/버튼이 DOM에 존재하는 것만으로 충분하지 않고 화면에 보여야 하며 비활성화 상태면 제외한다",
-        "예약 OPEN으로 새 알림을 보낼 때는 매칭된 예약 href가 있으면 해당 링크를 clickUrl로 사용한다",
+        "예약 OPEN으로 새 알림을 보낼 때는 예약 버튼 href 대신 버튼이 보였던 현재 페이지 finalUrl을 clickUrl로 사용한다",
         "예약 OPEN 알림 직전 전체 페이지 스크린샷을 logs/screenshots 아래에 저장한다"
       ]
     },
