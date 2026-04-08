@@ -1,0 +1,66 @@
+{
+  "entities": [
+    {
+      "name": "naver-booking-ping::Boundary::AlwaysDo",
+      "entityType": "boundary",
+      "observations": [
+        "pm2로 실행 중인 dist/main.js 반영 전에는 pnpm build 후 pm2 restart가 필요하다",
+        "예약 오픈 감지 변경 후에는 실제 로그에서 bookingLinks, bookingButtons, DebugMatch를 함께 확인한다"
+      ]
+    },
+    {
+      "name": "naver-booking-ping::Boundary::AskFirst",
+      "entityType": "boundary",
+      "observations": [
+        "새 외부 의존성 추가",
+        "모니터링 대상 URL 또는 정책 변경"
+      ]
+    },
+    {
+      "name": "naver-booking-ping::Boundary::NeverDo",
+      "entityType": "boundary",
+      "observations": [
+        "민감한 정보가 포함된 .claude/memory.json 커밋",
+        "사용자 변경과 무관한 백업 디렉터리 삭제 또는 커밋"
+      ]
+    },
+    {
+      "name": "naver-booking-ping::Domain::BookingDetection",
+      "entityType": "domain",
+      "observations": [
+        "예약 OPEN 판정은 예약 링크/버튼이 DOM에 존재하는 것만으로 충분하지 않고 화면에 보여야 하며 비활성화 상태면 제외한다",
+        "예약 OPEN으로 새 알림을 보낼 때는 매칭된 예약 href가 있으면 해당 링크를 clickUrl로 사용한다",
+        "예약 OPEN 알림 직전 전체 페이지 스크린샷을 logs/screenshots 아래에 저장한다"
+      ]
+    },
+    {
+      "name": "naver-booking-ping::Convention::BookingEvidenceLogging",
+      "entityType": "convention",
+      "observations": [
+        "예약 감지 로그에는 title, bookingLinks, bookingButtons를 남긴다",
+        "실제 매칭된 규칙이 있을 때는 DebugMatch에 rule, text, href를 추가로 남긴다",
+        "스크린샷이 생성되면 로그에 상대 경로를 남긴다"
+      ]
+    },
+    {
+      "name": "naver-booking-ping::Component::PlaywrightChecker",
+      "entityType": "component",
+      "observations": [
+        "checkNaverBooking은 actionable match를 기준으로 OPEN을 판정한다",
+        "captureEvidenceScreenshot으로 오픈 알림 순간의 전체 페이지 PNG를 저장한다"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "from": "naver-booking-ping::Component::PlaywrightChecker",
+      "relationType": "implements",
+      "to": "naver-booking-ping::Domain::BookingDetection"
+    },
+    {
+      "from": "naver-booking-ping::Convention::BookingEvidenceLogging",
+      "relationType": "supports",
+      "to": "naver-booking-ping::Domain::BookingDetection"
+    }
+  ]
+}

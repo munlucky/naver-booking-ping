@@ -114,6 +114,7 @@ export interface CheckResult {
   evidence: string[]; // Matched rule names
   finalUrl: string;
   error?: Error;
+  screenshotPath?: string;
   observedValue?: number | null;
   observedCurrency?: string | null;
   shouldNotify?: boolean;
@@ -124,6 +125,9 @@ export interface CheckResult {
     title: string;
     bookingLinks: number;
     bookingButtons: number;
+    matchedRule?: string;
+    matchedText?: string;
+    matchedHref?: string | null;
   };
 }
 

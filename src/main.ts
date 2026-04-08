@@ -358,6 +358,10 @@ async function main(): Promise<void> {
           `Check complete: ${target.name} -> ${result.status} (evidence: ${result.evidence.join(', ') || 'none'})`
         );
 
+        if (result.screenshotPath) {
+          logger.info(`  Screenshot: ${result.screenshotPath}`);
+        }
+
         // Log error if present (UNKNOWN status with error)
         if (result.error) {
           logger.info(`  Error: ${result.error.message}`);
@@ -368,6 +372,11 @@ async function main(): Promise<void> {
           logger.info(
             `  Debug: title="${result.debug.title}", bookingLinks=${result.debug.bookingLinks}, bookingButtons=${result.debug.bookingButtons}`
           );
+          if (result.debug.matchedRule || result.debug.matchedText || result.debug.matchedHref) {
+            logger.info(
+              `  DebugMatch: rule=${result.debug.matchedRule || '-'}, text="${result.debug.matchedText || ''}", href=${result.debug.matchedHref || '-'}`
+            );
+          }
         }
 
         if (result.details?.currentPrice && result.observedCurrency) {

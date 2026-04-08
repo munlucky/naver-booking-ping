@@ -3,6 +3,8 @@
  * Supports Naver booking availability and flight fare tracking
  */
 
+import { existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import type { Page } from 'playwright';
 import type { BrowserManager } from '../infrastructure/playwright/browser.js';
 import type {
@@ -64,6 +66,14 @@ interface FlightPriceCandidate {
   text: string;
   score: number;
 }
+
+interface BookingMatch {
+  ruleName: string;
+  text: string;
+  href: string | null;
+}
+
+const SCREENSHOT_DIR = join('logs', 'screenshots');
 
 /**
  * Checker interface
@@ -211,6 +221,21 @@ function pickCurrentFlightPrice(candidates: FlightPriceCandidate[]): FlightPrice
   }, preferred[0]);
 }
 
+function ensureScreenshotDir(): void {
+  if (!existsSync(SCREENSHOT_DIR)) {
+    mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  }
+}
+
+function sanitizeFilePart(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+}
+
 /**
  * Playwright-based checker implementation
  */
@@ -251,6 +276,7 @@ export class PlaywrightChecker implements Checker {
     previousState: TargetState | null
   ): Promise<CheckResult> {
     const evidence: string[] = [];
+    const matches: BookingMatch[] = [];
 
     try {
       await page.goto(target.urlInput, {
@@ -271,39 +297,54 @@ export class PlaywrightChecker implements Checker {
       const finalUrl = page.url();
       const title = await page.title().catch(() => 'unknown');
       const activeRules = this.getActiveRules(target.policy);
-      const bookingLinks = await page.locator('a[href*="booking"]').count();
-      const bookingButtons = await page.locator('a:has-text("예약"), button:has-text("예약")').count();
+      const bookingLinks = await this.countActionableMatches(page, 'a[href*="booking"]');
+      const bookingButtons = await this.countActionableMatches(
+        page,
+        'a[role="button"]:has-text("예약"), button:has-text("예약"), a.D_Xqt:has-text("예약")'
+      );
 
       for (const rule of activeRules) {
         const matched = await this.applyRule(page, rule);
-        if (matched) {
-          evidence.push(rule.name);
+        if (matched !== null) {
+          evidence.push(matched.ruleName);
+          matches.push(matched);
         }
       }
 
       const status = this.determineStatus(evidence, target.policy);
       const shouldNotify = status === 'OPEN' && previousState?.lastStatus !== 'OPEN';
+      const primaryMatch = matches[0];
+      const clickUrl = primaryMatch?.href ?? target.urlInput;
+      const screenshotPath = shouldNotify
+        ? await this.captureEvidenceScreenshot(page, target.id, target.name)
+        : undefined;
 
       return {
         status,
         evidence,
         finalUrl,
+        screenshotPath,
         shouldNotify,
         notification: shouldNotify
           ? {
               title: `[${target.name}] 예약 버튼 활성화`,
               body: '예약 버튼이 활성화됐습니다!',
-              clickUrl: target.urlInput,
+              clickUrl,
             }
           : undefined,
         details: {
           monitorKind: target.kind,
           policy: target.policy,
+          matchedHref: primaryMatch?.href ?? null,
+          screenshotPath: screenshotPath ?? null,
         },
         debug: {
           title,
           bookingLinks,
           bookingButtons,
+          matchedRule: primaryMatch?.ruleName,
+          matchedText: primaryMatch?.text,
+          matchedHref: primaryMatch?.href ?? null,
         },
       };
     } catch (error) {
@@ -388,6 +429,9 @@ export class PlaywrightChecker implements Checker {
       const currentPriceLabel = formatCurrencyValue(selectedCandidate.value, selectedCandidate.currency);
       const previousPriceLabel =
         previousBest === null ? null : formatCurrencyValue(previousBest, selectedCandidate.currency);
+      const screenshotPath = shouldNotify
+        ? await this.captureEvidenceScreenshot(page, target.id, target.name)
+        : undefined;
 
       return {
         status,
@@ -397,6 +441,7 @@ export class PlaywrightChecker implements Checker {
           `page-title:${title}`,
         ],
         finalUrl,
+        screenshotPath,
         observedValue: selectedCandidate.value,
         observedCurrency: selectedCandidate.currency,
         shouldNotify,
@@ -420,6 +465,7 @@ export class PlaywrightChecker implements Checker {
           previousBestPrice: previousBest,
           probeSource: selectedCandidate.source,
           directOnly: target.priceQuery.directOnly ?? false,
+          screenshotPath: screenshotPath ?? null,
         },
       };
     } catch (error) {
@@ -444,21 +490,19 @@ export class PlaywrightChecker implements Checker {
     return CHECK_RULES.filter((rule) => policy.includes(rule.name));
   }
 
-  private async applyRule(page: Page, rule: CheckRule): Promise<boolean> {
+  private async applyRule(page: Page, rule: CheckRule): Promise<BookingMatch | null> {
     try {
       if (rule.name === 'C') {
         return await this.checkRuleC(page);
       }
 
-      const element = page.locator(rule.selector).first();
-      const count = await element.count();
-      return count > 0;
+      return await this.findFirstActionableMatch(page, rule.selector, rule.name);
     } catch {
-      return false;
+      return null;
     }
   }
 
-  private async checkRuleC(page: Page): Promise<boolean> {
+  private async checkRuleC(page: Page): Promise<BookingMatch | null> {
     try {
       const elements = await page.locator('button:not(:disabled), a:not([disabled])').all();
 
@@ -466,16 +510,121 @@ export class PlaywrightChecker implements Checker {
         try {
           const text = await element.textContent();
           if (text && TIME_SLOT_PATTERN.test(text.trim())) {
-            return true;
+            const href = await element.getAttribute('href').catch(() => null);
+            return {
+              ruleName: 'C',
+              text: text.trim(),
+              href,
+            };
           }
         } catch {
           continue;
         }
       }
 
-      return false;
+      return null;
     } catch {
-      return false;
+      return null;
+    }
+  }
+
+  private async findFirstActionableMatch(
+    page: Page,
+    selector: string,
+    ruleName: string
+  ): Promise<BookingMatch | null> {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    const limit = Math.min(count, 10);
+
+    for (let index = 0; index < limit; index++) {
+      const candidate = locator.nth(index);
+      const visible = await candidate.isVisible().catch(() => false);
+      if (!visible) {
+        continue;
+      }
+
+      const isDisabled = await candidate
+        .evaluate((node) => {
+          const ariaDisabled = node.getAttribute('aria-disabled');
+          if (ariaDisabled === 'true') {
+            return true;
+          }
+          if (node instanceof HTMLButtonElement) {
+            return node.disabled;
+          }
+          return false;
+        })
+        .catch(() => false);
+      if (isDisabled) {
+        continue;
+      }
+
+      const text = (await candidate.textContent().catch(() => ''))?.trim() || '';
+      const href = await candidate.getAttribute('href').catch(() => null);
+      const resolvedHref = href ? new URL(href, page.url()).toString() : null;
+
+      return {
+        ruleName,
+        text,
+        href: resolvedHref,
+      };
+    }
+
+    return null;
+  }
+
+  private async countActionableMatches(page: Page, selector: string): Promise<number> {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    const limit = Math.min(count, 20);
+    let actionableCount = 0;
+
+    for (let index = 0; index < limit; index++) {
+      const candidate = locator.nth(index);
+      const visible = await candidate.isVisible().catch(() => false);
+      if (!visible) {
+        continue;
+      }
+
+      const isDisabled = await candidate
+        .evaluate((node) => {
+          const ariaDisabled = node.getAttribute('aria-disabled');
+          if (ariaDisabled === 'true') {
+            return true;
+          }
+          if (node instanceof HTMLButtonElement) {
+            return node.disabled;
+          }
+          return false;
+        })
+        .catch(() => false);
+
+      if (!isDisabled) {
+        actionableCount++;
+      }
+    }
+
+    return actionableCount;
+  }
+
+  private async captureEvidenceScreenshot(
+    page: Page,
+    targetId: string,
+    targetName: string
+  ): Promise<string | undefined> {
+    try {
+      ensureScreenshotDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = `${timestamp}-${sanitizeFilePart(targetName)}-${targetId}.png`;
+      const relativePath = join(SCREENSHOT_DIR, fileName);
+      await page.screenshot({
+        path: relativePath,
+        fullPage: true,
+      });
+      return relativePath;
+    } catch {
+      return undefined;
     }
   }
 
