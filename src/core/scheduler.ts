@@ -1,5 +1,5 @@
 /**
- * Scheduler with jitter support
+ * Scheduler with one-sided jitter support
  */
 
 import type { SchedulerConfig } from '../types/index.js';
@@ -14,7 +14,7 @@ export interface Scheduler {
 }
 
 /**
- * Jitter scheduler implementation (no backoff)
+ * One-sided jitter scheduler implementation (no backoff)
  */
 export class JitterScheduler implements Scheduler {
   private timer: NodeJS.Timeout | null = null;
@@ -64,7 +64,7 @@ export class JitterScheduler implements Scheduler {
   }
 
   /**
-   * Schedule next execution with jitter
+   * Schedule next execution with one-sided jitter
    */
   private scheduleNext(callback: () => Promise<void>): void {
     if (!this.isRunning) {
@@ -101,15 +101,16 @@ export class JitterScheduler implements Scheduler {
   }
 
   /**
-   * Calculate delay with jitter only (no backoff)
+   * Calculate delay with one-sided jitter only (no backoff)
    */
   private calculateDelay(): number {
     const { baseIntervalMs, jitterRatio } = this.config;
 
-    // Apply jitter: delay * (1 ± jitterRatio)
+    // Apply one-sided jitter: delay * (1 - [0..jitterRatio])
+    // This preserves the configured interval as the maximum delay.
     const jitterRange = baseIntervalMs * jitterRatio;
-    const jitter = (Math.random() * 2 - 1) * jitterRange; // -jitter to +jitter
-    const delay = Math.floor(baseIntervalMs + jitter);
+    const jitter = Math.random() * jitterRange; // 0 to +jitterRange, subtracted below
+    const delay = Math.floor(baseIntervalMs - jitter);
 
     return Math.max(delay, 1000); // Minimum 1 second
   }

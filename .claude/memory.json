@@ -5,7 +5,17 @@
       "entityType": "boundary",
       "observations": [
         "pm2로 실행 중인 dist/main.js 반영 전에는 pnpm build 후 pm2 restart가 필요하다",
-        "예약 오픈 감지 변경 후에는 실제 로그에서 bookingLinks, bookingButtons, DebugMatch를 함께 확인한다"
+        "예약 오픈 감지 변경 후에는 실제 로그에서 bookingLinks, bookingButtons, DebugMatch를 함께 확인한다",
+        "폴링 간격 변경 시에는 scheduler jitter 계산과 config/config.yaml 값을 함께 맞춘다"
+      ]
+    },
+    {
+      "name": "naver-booking-ping::Component::JitterScheduler",
+      "entityType": "component",
+      "observations": [
+        "jitterRatio는 초 단위가 아니라 baseIntervalMs 대비 비율이다",
+        "현재 지터는 단방향으로만 적용되어 지연은 baseIntervalMs를 넘지 않고 더 짧아지기만 한다",
+        "baseIntervalMs 10000, jitterRatio 0.15일 때 CLOSED 폴링 범위는 8.5초에서 10초다"
       ]
     },
     {
@@ -59,6 +69,11 @@
     },
     {
       "from": "naver-booking-ping::Convention::BookingEvidenceLogging",
+      "relationType": "supports",
+      "to": "naver-booking-ping::Domain::BookingDetection"
+    },
+    {
+      "from": "naver-booking-ping::Component::JitterScheduler",
       "relationType": "supports",
       "to": "naver-booking-ping::Domain::BookingDetection"
     }
