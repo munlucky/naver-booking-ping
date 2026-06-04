@@ -92,8 +92,9 @@ export class PlaywrightBrowserManager implements BrowserManager {
 
   /**
    * Get or create a page instance
-   * Creates a fresh page for each request to avoid crashes from reuse
-   * Periodically recreates context and browser to prevent memory leaks
+   * Reuses a single page for repeated polling so cookies/session/localStorage
+   * are preserved and the site sees a more browser-like pattern.
+   * Periodically recreates context and browser to prevent memory leaks.
    */
   async getPage(): Promise<Page> {
     // Periodically restart browser to prevent Chrome memory leaks
@@ -109,6 +110,15 @@ export class PlaywrightBrowserManager implements BrowserManager {
       // Reset context when browser is recreated
       this.context = null;
       this.contextUseCount = 0;
+    }
+
+    // Reuse the existing live page whenever possible. This is important for
+    // Naver Place: opening/closing a brand-new page every poll increases the
+    // chance of triggering the "excessive access" restriction page.
+    if (this.page && !this.page.isClosed() && this.context && this.contextUseCount < this.MAX_CONTEXT_USES) {
+      this.contextUseCount++;
+      this.browserUseCount++;
+      return this.page;
     }
 
     // Periodically recreate context to prevent resource accumulation
@@ -133,15 +143,15 @@ export class PlaywrightBrowserManager implements BrowserManager {
     // Context is guaranteed to be non-null here after needsNewContext check
     const context = this.context!;
 
-    // Always create a fresh page to avoid crashes from reuse
-    const page = await context.newPage();
-    page.setDefaultTimeout(this.config.timeoutMs);
+    // Create the persistent page used for subsequent checks.
+    this.page = await context.newPage();
+    this.page.setDefaultTimeout(this.config.timeoutMs);
 
     // Increment counters
     this.contextUseCount++;
     this.browserUseCount++;
 
-    return page;
+    return this.page;
   }
 
   /**

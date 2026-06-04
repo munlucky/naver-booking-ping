@@ -97,7 +97,7 @@ async function sendHeartbeatIfNeeded(ntfyConfig: { serverUrl: string; heartbeatT
 /**
  * Polling interval constants (in milliseconds)
  */
-const INTERVAL_WHEN_CLOSED = 10000; // 10 seconds when all targets are CLOSED
+const INTERVAL_WHEN_CLOSED = 20000; // 20 seconds when all targets are CLOSED
 const INTERVAL_WHEN_OPEN = 60000;   // 60 seconds when any target is OPEN
 
 /**

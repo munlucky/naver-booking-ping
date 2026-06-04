@@ -259,11 +259,15 @@ export class PlaywrightChecker implements Checker {
 
       return await this.checkNaverBooking(page, target, context.previousState ?? null);
     } finally {
-      try {
-        await page.close({ runBeforeUnload: false });
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.warn(`[Checker] Page close failed (will be cleaned up on restart): ${errorMsg}`);
+      // Keep the Naver page open between checks. Closing/reopening a brand-new
+      // page every poll can make Naver Place show an excessive-access page.
+      if (target.kind !== 'naver-booking') {
+        try {
+          await page.close({ runBeforeUnload: false });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.warn(`[Checker] Page close failed (will be cleaned up on restart): ${errorMsg}`);
+        }
       }
     }
   }
@@ -280,10 +284,17 @@ export class PlaywrightChecker implements Checker {
     const matches: BookingMatch[] = [];
 
     try {
-      await page.goto(target.urlInput, {
-        waitUntil: 'networkidle',
-        timeout: this.timeoutMs,
-      });
+      if (page.url() === 'about:blank' || !page.url().startsWith(target.urlInput)) {
+        await page.goto(target.urlInput, {
+          waitUntil: 'networkidle',
+          timeout: this.timeoutMs,
+        });
+      } else {
+        await page.reload({
+          waitUntil: 'networkidle',
+          timeout: this.timeoutMs,
+        });
+      }
 
       if (target.name) {
         try {
@@ -297,6 +308,52 @@ export class PlaywrightChecker implements Checker {
 
       const finalUrl = page.url();
       const title = await page.title().catch(() => 'unknown');
+      const bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+
+      if (this.isNaverAccessLimited(bodyText)) {
+        return {
+          status: 'UNKNOWN',
+          evidence: ['naver-access-limited'],
+          finalUrl,
+          error: new Error('Naver Place access is limited for this IP/session'),
+          details: {
+            monitorKind: target.kind,
+            policy: target.policy,
+            accessLimited: true,
+          },
+          debug: {
+            title,
+            bookingLinks: 0,
+            bookingButtons: 0,
+            matchedRule: 'LIMITED',
+            matchedText: bodyText.slice(0, 200),
+            matchedHref: null,
+          },
+        };
+      }
+
+      if (target.name && !bodyText.includes(target.name)) {
+        return {
+          status: 'UNKNOWN',
+          evidence: ['target-name-not-rendered'],
+          finalUrl,
+          error: new Error(`Naver Place target name was not rendered: ${target.name}`),
+          details: {
+            monitorKind: target.kind,
+            policy: target.policy,
+            targetNameMissing: true,
+          },
+          debug: {
+            title,
+            bookingLinks: 0,
+            bookingButtons: 0,
+            matchedRule: 'TARGET_NAME_MISSING',
+            matchedText: bodyText.slice(0, 200),
+            matchedHref: null,
+          },
+        };
+      }
+
       const activeRules = this.getActiveRules(target.policy);
       const bookingLinks = await this.countActionableMatches(page, 'a[href*="booking"]');
       const bookingButtons = await this.countActionableMatches(
@@ -527,6 +584,10 @@ export class PlaywrightChecker implements Checker {
     } catch {
       return null;
     }
+  }
+
+  private isNaverAccessLimited(bodyText: string): boolean {
+    return /서비스 이용이 제한|과도한 접근 요청|잠시 후 다시 시도/.test(bodyText);
   }
 
   private async findFirstActionableMatch(
