@@ -261,7 +261,11 @@ async function main(): Promise<void> {
   // Initialize browser
   logger.info('Initializing browser...');
   const browserManager = await createBrowserManager(config.browser);
-  const checker = createChecker(browserManager, config.browser.timeoutMs);
+  const checker = createChecker(
+    browserManager,
+    config.browser.timeoutMs,
+    config.browser.captureEvidenceScreenshots
+  );
   const notifier = createNotifier(config.ntfy, logger);
   const scheduler = createScheduler(config.scheduler);
 

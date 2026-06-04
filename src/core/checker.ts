@@ -242,7 +242,8 @@ function sanitizeFilePart(value: string): string {
 export class PlaywrightChecker implements Checker {
   constructor(
     private browserManager: BrowserManager,
-    private timeoutMs: number = 30000
+    private timeoutMs: number = 30000,
+    private captureEvidenceScreenshots: boolean = false
   ) {}
 
   /**
@@ -315,7 +316,7 @@ export class PlaywrightChecker implements Checker {
       const shouldNotify = status === 'OPEN' && previousState?.lastStatus !== 'OPEN';
       const primaryMatch = matches[0];
       const clickUrl = finalUrl || target.urlInput;
-      const screenshotPath = shouldNotify
+      const screenshotPath = shouldNotify && this.captureEvidenceScreenshots
         ? await this.captureEvidenceScreenshot(page, target.id, target.name)
         : undefined;
 
@@ -429,7 +430,7 @@ export class PlaywrightChecker implements Checker {
       const currentPriceLabel = formatCurrencyValue(selectedCandidate.value, selectedCandidate.currency);
       const previousPriceLabel =
         previousBest === null ? null : formatCurrencyValue(previousBest, selectedCandidate.currency);
-      const screenshotPath = shouldNotify
+      const screenshotPath = shouldNotify && this.captureEvidenceScreenshots
         ? await this.captureEvidenceScreenshot(page, target.id, target.name)
         : undefined;
 
@@ -646,7 +647,8 @@ export class PlaywrightChecker implements Checker {
  */
 export function createChecker(
   browserManager: BrowserManager,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
+  captureEvidenceScreenshots: boolean = false
 ): Checker {
-  return new PlaywrightChecker(browserManager, timeoutMs);
+  return new PlaywrightChecker(browserManager, timeoutMs, captureEvidenceScreenshots);
 }

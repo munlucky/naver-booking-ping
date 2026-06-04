@@ -180,6 +180,7 @@ export interface BrowserConfig {
   headless: boolean;
   userAgent: string;
   timeoutMs: number;
+  captureEvidenceScreenshots?: boolean;
   viewport?: { width: number; height: number };
   locale?: string;
   timezoneId?: string;

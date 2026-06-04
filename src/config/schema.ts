@@ -34,6 +34,7 @@ export const BrowserConfigSchema = z.object({
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   ),
   timeoutMs: z.number().positive().default(30000),
+  captureEvidenceScreenshots: z.boolean().default(false),
   locale: z.string().default('ko-KR'),
   timezoneId: z.string().default('Asia/Seoul'),
   storageStatePath: z.string().default('./data/browser-storage-state.json'),
