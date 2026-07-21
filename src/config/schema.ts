@@ -14,6 +14,7 @@ export const NtfyConfigSchema = z.object({
   topic: z.string().min(1),
   priority: z.enum(['default', 'low', 'high', 'urgent']).default('high'),
   tags: z.array(z.string()).default(['bell', 'calendar']),
+  heartbeatTopic: z.string().min(1).optional(),
 });
 
 /**

@@ -7,7 +7,7 @@
 - **Playwright 기반 감지** - 웹페이지를 직접 열고 상태를 확인
 - **이중 모니터 타입** - `naver-booking`, `flight-price`를 동일한 루프에서 처리
 - **다층 감지 규칙** - 네이버 예약 Rule A/B/C, 항공권 가격 probe 작업 단위 지원
-- **10초 ±30% 지터** - 빠른 감지 + 트래픽 최소화
+- **상태별 조회 주기** - CLOSED 5초, OPEN 60초 기준의 단방향 지터
 - **ntfy 푸시 알림** - iOS/Android 앱으로 알림 수신
 - **JSON 상태 저장** - 네이티브 의존성 없이 Windows에서 바로 실행
 - **매일 7시 Heartbeat** - 시스템 정상 작동 확인 알림
@@ -112,8 +112,8 @@ targets:
 
 | 항목 | 기본값 | 설명 |
 |------|--------|------|
-| `baseIntervalMs` | 10000 (10초) | 체크 주기 |
-| `jitterRatio` | 0.3 (±30%) | 지터 비율 |
+| `baseIntervalMs` | 5000 (5초) | CLOSED 상태 기본 체크 주기 |
+| `jitterRatio` | 0.15 | 단방향 지터 비율 |
 | `heartbeatTopic` | - | Heartbeat 알림 토픽 (선택) |
 | `targets[].kind` | `naver-booking` | 모니터 타입 |
 | `targets[].priceQuery` | - | 항공권 검색 조건 |
@@ -181,7 +181,7 @@ naver-booking-ping/
 ## 동작 방식
 
 ```
-[매 10초 ±30%]
+[CLOSED: 매 5초 기준 / OPEN: 매 60초 기준]
    ↓
 [Playwright로 페이지 접속]
    ↓
@@ -201,7 +201,7 @@ naver-booking-ping/
 - **항공권 최저가**: 더 낮은 가격이 새로 발견될 때만 다시 알림
 - **Skyscanner 차단**: `--bootstrap-flight-session`으로 한 번 직접 챌린지를 통과해 저장된 세션을 재사용할 수 있음
 - **트래픽 최소화**: 지터로 네이버 서버 부하 방지
-- **고정 간격**: 항상 10초 ±30% 간격으로 체크 (백오프 없음)
+- **상태별 간격**: CLOSED는 5초, OPEN은 60초를 기준으로 단방향 지터를 적용하며 백오프는 없음
 
 ## 라이선스
 

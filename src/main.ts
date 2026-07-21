@@ -97,8 +97,15 @@ async function sendHeartbeatIfNeeded(ntfyConfig: { serverUrl: string; heartbeatT
 /**
  * Polling interval constants (in milliseconds)
  */
-const INTERVAL_WHEN_CLOSED = 20000; // 20 seconds when all targets are CLOSED
-const INTERVAL_WHEN_OPEN = 60000;   // 60 seconds when any target is OPEN
+function getIntervalFromEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return defaultValue;
+  }
+
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : defaultValue;
+}
 
 /**
  * Check if any enabled target is currently OPEN
@@ -189,6 +196,10 @@ async function main(): Promise<void> {
   }
 
   // Initialize logger
+  const intervalWhenClosed = getIntervalFromEnv('CHECK_INTERVAL_CLOSED_MS', config.scheduler.baseIntervalMs);
+  const intervalWhenOpen = getIntervalFromEnv('CHECK_INTERVAL_OPEN_MS', 60000);
+  config.scheduler.baseIntervalMs = intervalWhenClosed;
+
   const logger = createLogger(config.logging.level, config.logging.file);
   logger.info('Starting Naver Booking Ping...');
 
@@ -394,7 +405,7 @@ async function main(): Promise<void> {
     // Adjust polling interval based on current states
     // Use 60s interval if any target is OPEN, 10s if all are CLOSED
     const hasAnyOpen = await checkIfAnyTargetOpen(stateManager);
-    const newInterval = hasAnyOpen ? INTERVAL_WHEN_OPEN : INTERVAL_WHEN_CLOSED;
+    const newInterval = hasAnyOpen ? intervalWhenOpen : intervalWhenClosed;
     scheduler.updateInterval(newInterval);
   };
 

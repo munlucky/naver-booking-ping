@@ -10,7 +10,9 @@ module.exports = {
     watch: false,
     max_memory_restart: '500M',
     env: {
-      NODE_ENV: 'production'
+      NODE_ENV: 'production',
+      PLAYWRIGHT_BROWSERS_PATH: '/opt/data/ms-playwright',
+      HOME: '/opt/data/home',
     },
     // 날짜별 로그 설정 (pm2-logrotate 모듈 필요)
     error_file: './logs/pm2-error.log',

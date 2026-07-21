@@ -2,18 +2,18 @@
 
 # ntfy settings - https://ntfy.sh
 ntfy:
-  serverUrl: "https://ntfy.sh"
+  serverUrl: "${NTFY_SERVER_URL:-https://ntfy.sh}"
   # Generate a random topic name for security
-  topic: "YOUR_RANDOM_STRING_HERE"
-  priority: "high"
-  tags: ["bell", "calendar"]
+  topic: "${NTFY_TOPIC}"
+  priority: "${NTFY_PRIORITY:-high}"
+  tags: ["${NTFY_TAG_1:-bell}", "${NTFY_TAG_2:-calendar}"]
   # Heartbeat topic for daily status check (optional)
-  heartbeatTopic: "YOUR_RANDOM_STRING_HERE"
+  heartbeatTopic: "${NTFY_HEARTBEAT_TOPIC}"
 
 # Scheduler settings
 scheduler:
-  baseIntervalMs: 20000      # 20 seconds base interval
-  jitterRatio: 0.3           # +/- 30% jitter (14-26 seconds)
+  baseIntervalMs: ${CHECK_INTERVAL_CLOSED_MS:-5000}   # 5 seconds base interval when CLOSED
+  jitterRatio: ${SCHEDULER_JITTER_RATIO:-0.15}        # one-sided jitter (4.25-5 seconds with defaults)
 
 # Browser settings
 browser:
@@ -36,11 +36,11 @@ logging:
 # Monitoring targets
 targets:
   - kind: "naver-booking"
-    name: "Sample Naver Booking Target"
+    name: "${NAVER_BOOKING_TARGET_NAME}"
     # Replace with your actual Naver booking URL
-    urlInput: "https://m.place.naver.com/hospital/12345/home"
+    urlInput: "${NAVER_BOOKING_URL}"
     enabled: true
-    policy: "AB"            # Rules: A (booking link), B (booking button)
+    policy: "${NAVER_BOOKING_POLICY:-AB}"            # Rules: A (booking link), B (booking button)
 
   - kind: "flight-price"
     name: "Sydney Direct Flight"
